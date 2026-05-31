@@ -21,6 +21,7 @@ const MEM_SOURCES = ["自分", "Claude", "チャッピー", "Gemini", "複数"];
 const MEM_STATES = ["観察", "仮説", "採用", "保留"];
 const MEM_TAGS = ["観察", "状態", "AI", "プロダクト", "キャラクター", "ブランド", "その他"];
 
+const ARC_TYPES = ["発信済み", "アーカイブ"];
 const STATE_COLORS = { 観察: "#6B8CAE", 仮説: "#A89B6E", 採用: "#5A8A6A", 保留: "#666" };
 const SOURCE_COLORS = { 自分: "#AAA", Claude: "#C8A96E", チャッピー: "#7EB8A8", Gemini: "#9B8EC4", 複数: "#A88A7E" };
 
@@ -39,6 +40,7 @@ const defaultData = {
     },
   },
   memories: [],
+  archives: [],
 };
 
 // ── Storage ─────────────────────────────────────────────
@@ -113,6 +115,10 @@ export default function RAIteBrain() {
   const [filterSource, setFilterSource] = useState("");
   const [filterStar, setFilterStar] = useState(0);
 
+  const [newArc, setNewArc] = useState({ type: "発信済み", content: "", tag: "その他", memo: "" });
+  const [arcSearch, setArcSearch] = useState("");
+  const [arcFilterType, setArcFilterType] = useState("");
+
   const [showMission, setShowMission] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
@@ -158,6 +164,14 @@ export default function RAIteBrain() {
   const updateMem = (id, key, val) => set("memories", data.memories.map(m => m.id === id ? { ...m, [key]: val } : m));
   const deleteMem = (id) => set("memories", data.memories.filter(m => m.id !== id));
 
+  const addArchive = () => {
+    if (!newArc.content.trim()) return;
+    const a = { id: Date.now(), date: new Date().toLocaleDateString("ja-JP"), ...newArc };
+    set("archives", [a, ...data.archives]);
+    setNewArc({ type: "発信済み", content: "", tag: "その他", memo: "" });
+  };
+  const deleteArchive = (id) => set("archives", data.archives.filter(a => a.id !== id));
+
   const filtered = data.memories.filter(m => {
     if (filterType && m.type !== filterType) return false;
     if (filterState && m.state !== filterState) return false;
@@ -166,6 +180,15 @@ export default function RAIteBrain() {
     if (search) {
       const q = search.toLowerCase();
       return m.content.toLowerCase().includes(q) || m.tag.toLowerCase().includes(q) || m.state.toLowerCase().includes(q) || m.source.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const filteredArc = data.archives.filter(a => {
+    if (arcFilterType && a.type !== arcFilterType) return false;
+    if (arcSearch) {
+      const q = arcSearch.toLowerCase();
+      return a.content.toLowerCase().includes(q) || a.tag.toLowerCase().includes(q) || (a.memo || "").toLowerCase().includes(q);
     }
     return true;
   });
@@ -188,7 +211,9 @@ export default function RAIteBrain() {
 ミッション：${b.mission || "（未設定）"}
 ビジョン：${b.vision || "（未設定）"}
 トーン：${b.tone || "（未設定）"}
-禁止：${b.forbidden || "（未設定）"}
+
+【絶対にやらないこと】
+${b.forbidden || "（未設定）"}
 
 【用語定義】
 ${b.glossary.filter(g => g.term).map(g => `・${g.term}：${g.definition}`).join("\n") || "（未設定）"}
@@ -236,6 +261,7 @@ ${topMems.length ? topMems.map(m => `・[${m.state}|${m.source}] ${m.content}`).
     { id: "now", label: "今" },
     { id: "memory", label: "記憶" },
     { id: "sync", label: "同期" },
+    { id: "archive", label: "庫" },
     { id: "settings", label: "設定" },
   ];
 
@@ -432,6 +458,72 @@ ${topMems.length ? topMems.map(m => `・[${m.state}|${m.source}] ${m.content}`).
               <button style={S.copyBtn(copied === ai.key)} onClick={() => copyPrompt(ai.key)}>
                 {copied === ai.key ? "✓ コピーしました" : `${ai.name}用をコピー`}
               </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── ARCHIVE ── */}
+      {tab === "archive" && (
+        <div style={S.page}>
+          <span style={S.sectionLabel}>NEW</span>
+
+          <div style={{ marginBottom: 10 }}>
+            <span style={S.label}>種別</span>
+            <div style={{ display: "flex", gap: 7 }}>
+              {ARC_TYPES.map(t => (
+                <button key={t} style={S.pill(newArc.type === t)} onClick={() => setNewArc({ ...newArc, type: t })}>{t}</button>
+              ))}
+            </div>
+          </div>
+
+          <textarea style={{ ...S.textarea, marginBottom: 10 }} value={newArc.content} onChange={e => setNewArc({ ...newArc, content: e.target.value })} placeholder="内容（発信テキスト・メモなど）" rows={4} />
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <span style={S.label}>タグ</span>
+              <select style={S.select} value={newArc.tag} onChange={e => setNewArc({ ...newArc, tag: e.target.value })}>
+                {MEM_TAGS.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <span style={S.label}>メモ（任意）</span>
+            <input style={S.input} value={newArc.memo} onChange={e => setNewArc({ ...newArc, memo: e.target.value })} placeholder="補足・経緯など" />
+          </div>
+
+          <button style={S.primaryBtn} onClick={addArchive}>保存する</button>
+
+          <span style={{ ...S.sectionLabel, marginTop: 26 }}>STOCK</span>
+          <p style={{ fontSize: 10, color: C.muted, marginBottom: 12 }}>同期プロンプトには反映されません</p>
+
+          <input style={S.searchBar} value={arcSearch} onChange={e => setArcSearch(e.target.value)} placeholder="検索（内容・タグ・メモ）" />
+
+          <div style={{ ...S.filterRow, marginBottom: 14 }}>
+            {ARC_TYPES.map(t => (
+              <button key={t} style={S.pill(arcFilterType === t)} onClick={() => setArcFilterType(arcFilterType === t ? "" : t)}>{t}</button>
+            ))}
+          </div>
+
+          <p style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>{filteredArc.length}件</p>
+
+          {filteredArc.length === 0 && <p style={{ color: C.muted, fontSize: 13 }}>ストックはまだありません。</p>}
+
+          {filteredArc.map(arc => (
+            <div key={arc.id} style={S.card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <span style={S.badge(arc.type === "発信済み" ? C.green : C.muted)}>{arc.type}</span>
+                  <span style={{ fontSize: 9, color: C.muted }}>{arc.tag}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 9, color: C.muted }}>{arc.date}</span>
+                  <button style={S.removeBtn} onClick={() => deleteArchive(arc.id)}>×</button>
+                </div>
+              </div>
+              <p style={{ fontSize: 13, margin: "0 0 6px", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{arc.content}</p>
+              {arc.memo && <p style={{ fontSize: 11, color: C.muted, margin: 0 }}>{arc.memo}</p>}
             </div>
           ))}
         </div>
