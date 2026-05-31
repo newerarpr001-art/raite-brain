@@ -257,6 +257,21 @@ ${topMems.length ? topMems.map(m => `・[${m.state}|${m.source}] ${m.content}`).
     } catch { alert("JSONの形式が正しくありません"); }
   };
 
+  const importFromFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        setData(deepMerge(defaultData, parsed));
+        setShowImport(false);
+      } catch { alert("JSONの形式が正しくありません"); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const TABS = [
     { id: "now", label: "今" },
     { id: "memory", label: "記憶" },
@@ -592,18 +607,11 @@ ${topMems.length ? topMems.map(m => `・[${m.state}|${m.source}] ${m.content}`).
 
           <div style={S.fieldGroup}>
             <span style={S.label}>インポート</span>
-            {!showImport ? (
-              <button style={{ ...S.addBtn, width: "100%", padding: "9px" }} onClick={() => setShowImport(true)}>JSONからインポート</button>
-            ) : (
-              <>
-                <p style={{ fontSize: 11, color: C.red, marginBottom: 8 }}>※現在のデータは上書きされます</p>
-                <textarea style={{ ...S.textarea, minHeight: 100, marginBottom: 8 }} value={importText} onChange={e => setImportText(e.target.value)} placeholder='{"dashboard":{...},"brand":{...},...}' />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button style={{ ...S.primaryBtn, background: C.green }} onClick={importData}>実行</button>
-                  <button style={{ ...S.addBtn, flex: 1 }} onClick={() => { setShowImport(false); setImportText(""); }}>キャンセル</button>
-                </div>
-              </>
-            )}
+            <p style={{ fontSize: 11, color: C.red, marginBottom: 8 }}>※現在のデータは上書きされます</p>
+            <label style={{ ...S.primaryBtn, display: "block", textAlign: "center", cursor: "pointer", background: C.green, boxSizing: "border-box" }}>
+              JSONファイルを選択
+              <input type="file" accept=".json" onChange={importFromFile} style={{ display: "none" }} />
+            </label>
           </div>
         </div>
       )}
