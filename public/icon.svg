@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#0D0D0D"/>
+  <text x="256" y="200" font-family="Georgia, serif" font-size="110" font-weight="700" fill="#C8A96E" text-anchor="middle" dominant-baseline="middle">RB</text>
+  <text x="256" y="320" font-family="Georgia, serif" font-size="42" fill="#555" text-anchor="middle" dominant-baseline="middle" letter-spacing="8">BRAIN</text>
+</svg>
