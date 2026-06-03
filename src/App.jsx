@@ -1,6 +1,51 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
-// ── Deep Merge ──────────────────────────────────────────
+// ── Storage ──────────────────────────────────────────────
+const STORAGE_KEY = "raite_brain_v2";
+
+const TEMPLATE = {
+  brand: {
+    mission: "例）読者が自分の状態を言語化できるようにする",
+    vision: "例）AIと人間が対話しながら思考を深める文化をつくる",
+    tone: "例）乾いたトーン。観察者視点。断定しない。余白を残す。実務的。",
+    forbidden: "例）成功法則を語らない。ポジティブ強要しない。診断しない。",
+  },
+  aiRoles: {
+    common: `RAIteは「日常の違和感に言葉を渡す」メディアです。
+観察者視点を保ち、断定せず、余白を残してください。
+答えを出しすぎず、読者が自分で考える余地を必ず残してください。`,
+    claude: `あなたはClaudeです。
+役割：実装・設計・世界観構築を担う。
+実際に作る前提で考える。保守性と実装難易度を考慮する。
+機能追加を提案しすぎない。完成を急がない。思想を実装へ落とし込む。`,
+    chappy: `あなたはChatGPT（チャッピー）です。
+役割：相談役。構造整理・壁打ち・アイデア検証を担う。
+問いかけで思考を深める。答えより問いを重視する。
+ユーザーの言葉を引き出すことを優先する。`,
+    gemini: `あなたはGeminiです。
+役割：参謀。市場視点・外部観点・戦略立案を担う。
+客観的な視点を保つ。感情より構造を優先する。
+ユーザーの盲点を指摘することを恐れない。`,
+  },
+};
+
+const defaultData = {
+  apiKey: "",
+  theme: "light",
+  phase: "探索",
+  initialized: false,
+  brand: { mission: "", vision: "", tone: "", forbidden: "" },
+  aiRoles: {
+    common: { title: "共通", subtitle: "全AIへの共通前提", content: "" },
+    claude:  { title: "Claude", subtitle: "実装・設計・世界観", content: "" },
+    chappy:  { title: "チャッピー", subtitle: "壁打ち・構造整理", content: "" },
+    gemini:  { title: "Gemini", subtitle: "参謀・戦略", content: "" },
+  },
+  memos: [],
+  stocks: [],
+  publishHistory: [],
+};
+
 function deepMerge(target, source) {
   const result = { ...target };
   for (const key in source) {
@@ -13,89 +58,170 @@ function deepMerge(target, source) {
   return result;
 }
 
-// ── Constants ───────────────────────────────────────────
-const STORAGE_KEY = "raite_brain_v31";
-const PHASES = ["探索", "整理", "実装", "発信"];
-const MEM_TYPES = ["観察", "メモ"];
-const MEM_SOURCES = ["自分", "Claude", "チャッピー", "Gemini", "複数"];
-const MEM_STATES = ["観察", "仮説", "採用", "保留"];
-const MEM_TAGS = ["観察", "状態", "AI", "プロダクト", "キャラクター", "ブランド", "その他"];
-
-const ARC_TYPES = ["発信済み", "アーカイブ"];
-const STATE_COLORS = { 観察: "#6B8CAE", 仮説: "#A89B6E", 採用: "#5A8A6A", 保留: "#666" };
-const SOURCE_COLORS = { 自分: "#AAA", Claude: "#C8A96E", チャッピー: "#7EB8A8", Gemini: "#9B8EC4", 複数: "#A88A7E" };
-
-const defaultData = {
-  dashboard: {
-    theme: "", phase: "探索", weekFocus: "",
-    inProgress: [""], worries: [""], nextActions: [""],
-  },
-  brand: {
-    mission: "", vision: "", tone: "", forbidden: "",
-    glossary: [{ term: "", definition: "" }],
-    aiRoles: {
-      claude: "アプリ開発責任者。実装・設計・世界観構築を担う。",
-      chappy: "相談役。構造整理・壁打ち・アイデア検証を担う。",
-      gemini: "参謀。市場視点・外部観点・戦略立案を担う。",
-    },
-  },
-  memories: [],
-  archives: [],
-};
-
-// ── Storage ─────────────────────────────────────────────
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultData;
+    if (!raw) {
+      return {
+        ...defaultData,
+        initialized: true,
+        brand: { ...TEMPLATE.brand },
+        aiRoles: {
+          common: { title: "共通", subtitle: "全AIへの共通前提", content: TEMPLATE.aiRoles.common },
+          claude:  { title: "Claude", subtitle: "実装・設計・世界観", content: TEMPLATE.aiRoles.claude },
+          chappy:  { title: "チャッピー", subtitle: "壁打ち・構造整理", content: TEMPLATE.aiRoles.chappy },
+          gemini:  { title: "Gemini", subtitle: "参謀・戦略", content: TEMPLATE.aiRoles.gemini },
+        },
+      };
+    }
     return deepMerge(defaultData, JSON.parse(raw));
   } catch { return defaultData; }
 }
-function persist(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 
-// ── Styles ───────────────────────────────────────────────
-const C = {
-  bg: "#0D0D0D", surface: "#161616", border: "#222",
-  text: "#E2DAD0", muted: "#666", accent: "#C8A96E",
-  green: "#5A8A6A", red: "#8A5A5A",
+function persist(data) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+}
+
+// ── Constants ────────────────────────────────────────────
+const PHASES = ["探索", "整理", "実装", "発信"];
+const STOCK_TYPES = ["発信済み", "下書き", "メモ"];
+const AI_KEYS = ["common", "claude", "chappy", "gemini"];
+
+// ── Theme ────────────────────────────────────────────────
+const LIGHT = {
+  bg: "#f6f6f7", card: "#ffffff", border: "#eef0f2",
+  text: "#2b2d31", muted: "#7e848c", muted2: "#b9bbc0",
+  inputBg: "#ffffff", codeBg: "#f1f3f5", codeText: "#7e848c",
+  btnPrimary: "#2b2d31", btnPrimaryText: "#fff",
+  btnGhost: "#ffffff", btnGhostText: "#555", btnGhostBorder: "#eef0f2",
+  btnDanger: "#fff1f1", btnDangerText: "#ef4444", btnDangerBorder: "#fee2e2",
+  accent: "#2383e2", tabActive: "#2b2d31", tabBorder: "#2b2d31",
+  toastBg: "#2b2d31", toastText: "#fff",
+  headerBg: "#ffffff", headerBorder: "#eef0f2",
+  divider: "#eef0f2", tagActive: "#2b2d31", tagActiveText: "#fff",
 };
 
-const S = {
-  app: { minHeight: "100vh", backgroundColor: C.bg, color: C.text, fontFamily: "'Noto Serif JP','Georgia',serif", maxWidth: 480, margin: "0 auto", paddingBottom: 90 },
-  header: { padding: "18px 18px 14px", borderBottom: `1px solid ${C.border}` },
-  logo: { fontSize: 20, fontWeight: 700, letterSpacing: "0.18em", margin: 0, color: C.text },
-  logoSub: { fontSize: 9, color: C.muted, letterSpacing: "0.25em", marginTop: 3 },
-  tabBar: { display: "flex", borderBottom: `1px solid ${C.border}`, backgroundColor: C.bg, position: "sticky", top: 0, zIndex: 10 },
-  tab: (a) => ({ flex: 1, padding: "11px 2px", fontSize: 11, border: "none", background: "none", color: a ? C.text : C.muted, borderBottom: a ? `2px solid ${C.accent}` : "2px solid transparent", cursor: "pointer", letterSpacing: "0.05em", fontFamily: "'Noto Serif JP',serif" }),
-  page: { padding: "18px 18px 0" },
-  sectionLabel: { fontSize: 9, color: C.accent, letterSpacing: "0.22em", marginBottom: 12, marginTop: 22, borderLeft: `2px solid ${C.accent}`, paddingLeft: 7, display: "block" },
-  fieldGroup: { marginBottom: 16 },
-  label: { fontSize: 9, color: C.muted, letterSpacing: "0.15em", marginBottom: 5, display: "block" },
-  input: { width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "9px 11px", fontSize: 13, fontFamily: "'Noto Serif JP',serif", boxSizing: "border-box", outline: "none" },
-  textarea: { width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "9px 11px", fontSize: 13, fontFamily: "'Noto Serif JP',serif", boxSizing: "border-box", outline: "none", resize: "vertical", minHeight: 72 },
-  select: { width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "8px 10px", fontSize: 12, fontFamily: "'Noto Serif JP',serif", boxSizing: "border-box", outline: "none" },
-  row: { display: "flex", gap: 8, alignItems: "center", marginBottom: 8 },
-  pill: (active, color) => ({ padding: "4px 12px", borderRadius: 20, border: active ? `1px solid ${color || C.accent}` : `1px solid ${C.border}`, background: active ? `${(color || C.accent)}18` : "none", color: active ? (color || C.accent) : C.muted, fontSize: 11, cursor: "pointer", letterSpacing: "0.08em", fontFamily: "'Noto Serif JP',serif", whiteSpace: "nowrap" }),
-  addBtn: { background: "none", border: `1px solid ${C.border}`, color: C.muted, fontSize: 11, padding: "5px 11px", borderRadius: 4, cursor: "pointer", letterSpacing: "0.08em", fontFamily: "'Noto Serif JP',serif" },
-  removeBtn: { background: "none", border: "none", color: C.muted, fontSize: 17, cursor: "pointer", padding: "0 3px", lineHeight: 1, flexShrink: 0 },
-  primaryBtn: { background: C.accent, border: "none", color: C.bg, fontSize: 13, padding: "10px 18px", borderRadius: 4, cursor: "pointer", fontWeight: 700, letterSpacing: "0.1em", fontFamily: "'Noto Serif JP',serif", width: "100%" },
-  card: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: 13, marginBottom: 9 },
-  badge: (color) => ({ display: "inline-block", padding: "2px 7px", borderRadius: 10, fontSize: 9, color, border: `1px solid ${color}`, marginRight: 5, letterSpacing: "0.08em" }),
-  copyBtn: (ok) => ({ background: ok ? C.green : C.accent, border: "none", color: C.bg, fontSize: 12, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 700, letterSpacing: "0.1em", fontFamily: "'Noto Serif JP',serif", marginTop: 8, width: "100%" }),
-  promptBox: { background: "#111", border: `1px solid ${C.border}`, borderRadius: 5, padding: 12, fontSize: 11, color: "#999", whiteSpace: "pre-wrap", lineHeight: 1.8, marginTop: 8, maxHeight: 260, overflowY: "auto" },
-  disclosure: { background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer", padding: 0, letterSpacing: "0.1em", fontFamily: "'Noto Serif JP',serif", display: "flex", alignItems: "center", gap: 6 },
-  divider: { borderColor: C.border, margin: "18px 0 0" },
-  searchBar: { width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, color: C.text, padding: "9px 11px", fontSize: 13, fontFamily: "'Noto Serif JP',serif", boxSizing: "border-box", outline: "none", marginBottom: 10 },
-  filterRow: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 },
+const DARK = {
+  bg: "#121314", card: "#1e1f22", border: "#2c2d30",
+  text: "#e2e3e5", muted: "#6b6f76", muted2: "#4e5157",
+  inputBg: "#252628", codeBg: "#19191b", codeText: "#6b6f76",
+  btnPrimary: "#e2e3e5", btnPrimaryText: "#121314",
+  btnGhost: "#252628", btnGhostText: "#9a9da4", btnGhostBorder: "#2c2d30",
+  btnDanger: "#2d1a1a", btnDangerText: "#f87171", btnDangerBorder: "#4a2020",
+  accent: "#4a9eff", tabActive: "#e2e3e5", tabBorder: "#e2e3e5",
+  toastBg: "#e2e3e5", toastText: "#121314",
+  headerBg: "#1e1f22", headerBorder: "#2c2d30",
+  divider: "#2c2d30", tagActive: "#e2e3e5", tagActiveText: "#121314",
 };
 
-// ── Stars ────────────────────────────────────────────────
-function Stars({ value, onChange }) {
+// ── API ──────────────────────────────────────────────────
+async function callClaude(apiKey, systemPrompt, userMessage) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.content?.map(c => c.text || "").join("") || "";
+}
+
+// ── Components ───────────────────────────────────────────
+const ff = "'DM Sans', 'Noto Sans JP', system-ui, sans-serif";
+
+function Input({ value, onChange, placeholder, style, T }) {
   return (
-    <span>
-      {[1,2,3,4,5].map(i => (
-        <span key={i} onClick={() => onChange(i)} style={{ cursor: "pointer", fontSize: 15, color: i <= value ? C.accent : C.border, marginRight: 1 }}>★</span>
+    <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6,
+        padding: "10px 14px", fontSize: 13, color: T.text, background: T.inputBg,
+        outline: "none", fontFamily: ff, boxSizing: "border-box", borderRadius: 8, ...style }} />
+  );
+}
+
+function Textarea({ value, onChange, placeholder, rows = 3, style, T }) {
+  return (
+    <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+      style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6,
+        padding: "12px 14px", fontSize: 13, color: T.text, background: T.inputBg,
+        outline: "none", fontFamily: ff, boxSizing: "border-box", resize: "vertical",
+        borderRadius: 8, lineHeight: 1.8, ...style }} />
+  );
+}
+
+function Btn({ children, onClick, variant = "primary", size = "md", disabled, style, T }) {
+  const base = { border: "none", borderRadius: 8, cursor: disabled ? "not-allowed" : "pointer",
+    fontFamily: ff, fontWeight: 500, transition: "opacity 0.15s",
+    opacity: disabled ? 0.4 : 1, fontSize: size === "sm" ? 12 : 13,
+    padding: size === "sm" ? "5px 10px" : "8px 14px" };
+  const v = {
+    primary: { background: T.btnPrimary, color: T.btnPrimaryText },
+    ghost: { background: T.btnGhost, color: T.btnGhostText, border: `1px solid ${T.btnGhostBorder}` },
+    accent: { background: T.accent, color: "#fff" },
+    danger: { background: T.btnDanger, color: T.btnDangerText, border: `1px solid ${T.btnDangerBorder}` },
+  };
+  return <button onClick={disabled ? undefined : onClick} style={{ ...base, ...v[variant], ...style }}>{children}</button>;
+}
+
+function Label({ children, T }) {
+  return <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, letterSpacing: "0.06em",
+    textTransform: "uppercase", marginBottom: 6 }}>{children}</div>;
+}
+
+function Divider({ T }) {
+  return <div style={{ borderTop: `1px solid ${T.divider}`, margin: "16px 0" }} />;
+}
+
+function Tag({ children, active, onClick, T }) {
+  return (
+    <button onClick={onClick} style={{ padding: "4px 10px", borderRadius: 5,
+      border: `1px solid ${active ? T.tagActive : T.border}`,
+      background: active ? T.tagActive : "transparent",
+      color: active ? T.tagActiveText : T.muted,
+      fontSize: 11, fontFamily: ff, cursor: "pointer", fontWeight: active ? 500 : 400 }}>
+      {children}
+    </button>
+  );
+}
+
+function Toast({ message, T }) {
+  if (!message) return null;
+  return (
+    <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)",
+      background: T.toastBg, color: T.toastText, padding: "8px 18px", borderRadius: 6,
+      fontSize: 12, zIndex: 999, whiteSpace: "nowrap", pointerEvents: "none" }}>
+      {message}
+    </div>
+  );
+}
+
+function Dots() {
+  return (
+    <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+      {[0,1,2].map(i => (
+        <span key={i} style={{ width: 4, height: 4, borderRadius: "50%", background: "currentColor",
+          animation: `rb ${1}s ease-in-out ${i*0.15}s infinite` }} />
       ))}
+      <style>{`@keyframes rb{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}`}</style>
+    </span>
+  );
+}
+
+function XCount({ text, url, T }) {
+  const count = (text + (url ? "\n" + url : "")).length;
+  const over = count > 140;
+  return (
+    <span style={{ fontSize: 11, color: over ? "#dc2626" : T.muted, fontWeight: over ? 600 : 400 }}>
+      {count}/140{over ? " ⚠" : ""}
     </span>
   );
 }
@@ -103,27 +229,34 @@ function Stars({ value, onChange }) {
 // ── Main ─────────────────────────────────────────────────
 export default function RAIteBrain() {
   const [data, setData] = useState(load);
-  const [tab, setTab] = useState("now");
-  const [copied, setCopied] = useState("");
+  const [tab, setTab] = useState("base");
+  const [toast, setToast] = useState("");
+  const toastRef = useRef(null);
 
-  const [newMem, setNewMem] = useState({ type: "観察", source: "自分", content: "", tag: "観察", state: "観察", importance: 3 });
-  const [editingMem, setEditingMem] = useState(null);
+  const T = data.theme === "dark" ? DARK : LIGHT;
 
-  const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState("");
-  const [filterState, setFilterState] = useState("");
-  const [filterSource, setFilterSource] = useState("");
-  const [filterStar, setFilterStar] = useState(0);
+  const [editingRole, setEditingRole] = useState(null);
+  const [optimizing, setOptimizing] = useState(null);
+  const [memoTarget, setMemoTarget] = useState("common");
+  const [memoText, setMemoText] = useState("");
+  const [merging, setMerging] = useState(null);
 
-  const [newArc, setNewArc] = useState({ type: "発信済み", content: "", tag: "その他", memo: "" });
-  const [arcSearch, setArcSearch] = useState("");
-  const [arcFilterType, setArcFilterType] = useState("");
+  const [articleText, setArticleText] = useState("");
+  const [articleUrl, setArticleUrl] = useState("");
+  const [generating, setGenerating] = useState(false);
 
-  const [showMission, setShowMission] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [importText, setImportText] = useState("");
+  const [stockText, setStockText] = useState("");
+  const [stockType, setStockType] = useState("発信済み");
+  const [stockSearch, setStockSearch] = useState("");
+  const [stockFilter, setStockFilter] = useState("");
 
   useEffect(() => { persist(data); }, [data]);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    if (toastRef.current) clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(""), 2000);
+  };
 
   const set = (path, value) => {
     setData(prev => {
@@ -136,485 +269,535 @@ export default function RAIteBrain() {
     });
   };
 
-  const dashList = (field, idx, val) => {
-    const l = [...data.dashboard[field]]; l[idx] = val; set(`dashboard.${field}`, l);
-  };
-  const dashAdd = (field) => set(`dashboard.${field}`, [...data.dashboard[field], ""]);
-  const dashRemove = (field, idx) => {
-    const l = data.dashboard[field].filter((_, i) => i !== idx);
-    set(`dashboard.${field}`, l.length ? l : [""]);
-  };
+  const copy = (text) => navigator.clipboard.writeText(text).then(() => showToast("コピーしました"));
 
-  const glossaryUpdate = (idx, key, val) => {
-    const g = [...data.brand.glossary]; g[idx] = { ...g[idx], [key]: val }; set("brand.glossary", g);
-  };
-  const glossaryAdd = () => set("brand.glossary", [...data.brand.glossary, { term: "", definition: "" }]);
-  const glossaryRemove = (idx) => {
-    const g = data.brand.glossary.filter((_, i) => i !== idx);
-    set("brand.glossary", g.length ? g : [{ term: "", definition: "" }]);
-  };
-
-  const addMemory = () => {
-    if (!newMem.content.trim()) return;
-    const m = { id: Date.now(), date: new Date().toLocaleDateString("ja-JP"), ...newMem };
-    set("memories", [m, ...data.memories]);
-    setNewMem({ type: "観察", source: "自分", content: "", tag: "観察", state: "観察", importance: 3 });
-  };
-
-  const updateMem = (id, key, val) => set("memories", data.memories.map(m => m.id === id ? { ...m, [key]: val } : m));
-  const deleteMem = (id) => set("memories", data.memories.filter(m => m.id !== id));
-
-  const addArchive = () => {
-    if (!newArc.content.trim()) return;
-    const a = { id: Date.now(), date: new Date().toLocaleDateString("ja-JP"), ...newArc };
-    set("archives", [a, ...data.archives]);
-    setNewArc({ type: "発信済み", content: "", tag: "その他", memo: "" });
-  };
-  const deleteArchive = (id) => set("archives", data.archives.filter(a => a.id !== id));
-
-  const filtered = data.memories.filter(m => {
-    if (filterType && m.type !== filterType) return false;
-    if (filterState && m.state !== filterState) return false;
-    if (filterSource && m.source !== filterSource) return false;
-    if (filterStar && m.importance < filterStar) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return m.content.toLowerCase().includes(q) || m.tag.toLowerCase().includes(q) || m.state.toLowerCase().includes(q) || m.source.toLowerCase().includes(q);
-    }
-    return true;
-  });
-
-  const filteredArc = data.archives.filter(a => {
-    if (arcFilterType && a.type !== arcFilterType) return false;
-    if (arcSearch) {
-      const q = arcSearch.toLowerCase();
-      return a.content.toLowerCase().includes(q) || a.tag.toLowerCase().includes(q) || (a.memo || "").toLowerCase().includes(q);
-    }
-    return true;
-  });
-
-  const generatePrompt = (ai) => {
-    const d = data.dashboard;
+  const buildPrompt = (aiKey) => {
     const b = data.brand;
-    const roles = { claude: b.aiRoles.claude, chappy: b.aiRoles.chappy, gemini: b.aiRoles.gemini };
-    const names = { claude: "Claude", chappy: "ChatGPT（チャッピー）", gemini: "Gemini" };
-
-    const topMems = [...data.memories]
-      .sort((a, b) => {
-        const stateScore = { 採用: 3, 仮説: 2, 観察: 1, 保留: 0 };
-        if (stateScore[b.state] !== stateScore[a.state]) return stateScore[b.state] - stateScore[a.state];
-        return b.importance - a.importance;
-      })
-      .slice(0, 5);
-
-    return `【共通文脈 / RAIteとは】
-ミッション：${b.mission || "（未設定）"}
-ビジョン：${b.vision || "（未設定）"}
-トーン：${b.tone || "（未設定）"}
-
-【絶対にやらないこと】
-${b.forbidden || "（未設定）"}
-
-【用語定義】
-${b.glossary.filter(g => g.term).map(g => `・${g.term}：${g.definition}`).join("\n") || "（未設定）"}
-
-【現在状況】
-テーマ：${d.theme || "（未設定）"}　フェーズ：${d.phase}
-今週の重点：${d.weekFocus || "（未設定）"}
-制作中：${d.inProgress.filter(Boolean).join(" / ") || "なし"}
-悩み：${d.worries.filter(Boolean).join(" / ") || "なし"}
-次にやること：${d.nextActions.filter(Boolean).join(" / ") || "なし"}
-
-【重要な記憶（上位5件）】
-${topMems.length ? topMems.map(m => `・[${m.state}|${m.source}] ${m.content}`).join("\n") : "（なし）"}
-
-【あなたへの依頼】
-あなたは${names[ai]}です。
-役割：${roles[ai]}`;
+    const roles = data.aiRoles;
+    const names = { common: "共通", claude: "Claude", chappy: "チャッピー", gemini: "Gemini" };
+    const brand = [
+      b.mission && `ミッション：${b.mission}`,
+      b.vision && `ビジョン：${b.vision}`,
+      b.tone && `トーン：${b.tone}`,
+      b.forbidden && `禁止：${b.forbidden}`,
+    ].filter(Boolean).join("\n");
+    return [
+      "【RAIte共通定義】",
+      brand || "（未設定）",
+      `フェーズ：${data.phase}`,
+      roles.common.content && `\n【共通指示】\n${roles.common.content}`,
+      aiKey !== "common" && roles[aiKey].content && `\n【${names[aiKey]}への指示】\n${roles[aiKey].content}`,
+      `\nあなたは${aiKey === "common" ? "RAIteのAIアシスタント" : names[aiKey]}です。`,
+    ].filter(Boolean).join("\n");
   };
 
-  const copyPrompt = (ai) => {
-    navigator.clipboard.writeText(generatePrompt(ai)).then(() => {
-      setCopied(ai); setTimeout(() => setCopied(""), 2000);
-    });
-  };
-
-  const exportData = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `raite_brain_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const importData = () => {
+  const optimizeRole = async (aiKey) => {
+    if (!data.apiKey) { showToast("APIキーを設定してください"); setTab("settings"); return; }
+    const current = data.aiRoles[aiKey].content;
+    if (!current.trim()) { showToast("内容が空です"); return; }
+    setOptimizing(aiKey);
     try {
-      const parsed = JSON.parse(importText);
-      setData(deepMerge(defaultData, parsed));
-      setImportText(""); setShowImport(false);
-    } catch { alert("JSONの形式が正しくありません"); }
+      const result = await callClaude(data.apiKey,
+        "システムプロンプト最適化の専門家。与えられたテキストを簡潔なシステムプロンプトに変換。冗長部分を削除。変換後のプロンプトのみ返す。",
+        `以下をシステムプロンプトとして最適化：\n\n${current}`);
+      set(`aiRoles.${aiKey}.content`, result.trim());
+      showToast("最適化しました");
+    } catch (e) { showToast("エラー: " + e.message); }
+    setOptimizing(null);
   };
 
-  const importFromFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const parsed = JSON.parse(ev.target.result);
-        setData(deepMerge(defaultData, parsed));
-        setShowImport(false);
-      } catch { alert("JSONの形式が正しくありません"); }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+  const mergeMemo = async (memo) => {
+    if (!data.apiKey) { showToast("APIキーを設定してください"); return; }
+    setMerging(memo.id);
+    try {
+      const current = data.aiRoles[memo.target].content;
+      const result = await callClaude(data.apiKey,
+        "AIへの指示文を管理する専門家。既存のシステムプロンプトに新しい情報を統合し、重複を排除して簡潔に最適化。統合後のプロンプトのみ返す。",
+        `既存：\n${current || "（空）"}\n\n追加：\n${memo.content}\n\n統合・最適化してください。`);
+      set(`aiRoles.${memo.target}.content`, result.trim());
+      set("memos", data.memos.filter(m => m.id !== memo.id));
+      showToast("統合しました");
+    } catch (e) { showToast("エラー: " + e.message); }
+    setMerging(null);
   };
+
+  const generateSNS = async () => {
+    if (!data.apiKey) { showToast("APIキーを設定してください"); setTab("settings"); return; }
+    if (!articleText.trim()) { showToast("記事本文を入力してください"); return; }
+    setGenerating(true);
+    try {
+      const result = await callClaude(data.apiKey,
+        `RAIteのSNS投稿文生成。思想：日常の違和感に言葉を渡す。診断しない。断定しない。観察する。余白を残す。乾いたトーン。
+JSONのみ返す：{"x":"X用。一番刺さる一行。140文字以内。URLなし。","threads":"Threads用。2〜4行でチラ見せ。答えを出しきらない。URLなし。"}`,
+        `記事：\n${articleText}`);
+      const parsed = JSON.parse(result.replace(/```json|```/g, "").trim());
+      const entry = { id: Date.now(), date: new Date().toLocaleDateString("ja-JP"),
+        articlePreview: articleText.slice(0, 60) + (articleText.length > 60 ? "..." : ""),
+        url: articleUrl, x: parsed.x, threads: parsed.threads };
+      set("publishHistory", [entry, ...data.publishHistory].slice(0, 10));
+    } catch (e) { showToast("エラー: " + e.message); }
+    setGenerating(false);
+  };
+
+  const sendToPublish = (content) => {
+    setArticleText(content);
+    setTab("publish");
+    showToast("発信タブにセットしました");
+  };
+
+  const filteredStocks = data.stocks.filter(s => {
+    if (stockFilter && s.type !== stockFilter) return false;
+    if (stockSearch) return s.content.toLowerCase().includes(stockSearch.toLowerCase());
+    return true;
+  });
 
   const TABS = [
-    { id: "now", label: "今" },
-    { id: "memory", label: "記憶" },
-    { id: "sync", label: "同期" },
-    { id: "archive", label: "庫" },
+    { id: "base", label: "ベース" },
+    { id: "instruct", label: "指示" },
+    { id: "publish", label: "発信" },
+    { id: "stock", label: "ストック" },
     { id: "settings", label: "設定" },
   ];
 
+  const s = {
+    page: { maxWidth: 480, margin: "0 auto", padding: "16px 16px 0" },
+    card: { border: `1px solid ${T.border}`, borderRadius: 8, background: T.card, overflow: "hidden" },
+    sec: { marginBottom: 20 },
+  };
+
   return (
-    <div style={S.app}>
-      <div style={S.header}>
-        <p style={S.logo}>RAIte Brain</p>
-        <p style={S.logoSub}>MEMORY · CONTEXT · SYNC</p>
+    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: ff, paddingBottom: 90, color: T.text }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500&display=swap');
+        * { box-sizing: border-box; }
+        input::placeholder, textarea::placeholder { color: ${T.muted2}; }
+        input:focus, textarea:focus { border-color: ${T.text} !important; box-shadow: 0 0 0 2px ${T.text}18; }
+        button:active { opacity: 0.7 !important; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 2px; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ background: T.headerBg, borderBottom: `1px solid ${T.headerBorder}`,
+        padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between",
+        position: "sticky", top: 0, zIndex: 100 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: T.text, letterSpacing: "-0.01em" }}>Multi AI Brain</div>
+          <div style={{ fontSize: 10, color: T.muted2, marginTop: 1 }}>MULTI AI BRAIN</div>
+        </div>
       </div>
 
-      <div style={S.tabBar}>
-        {TABS.map(t => <button key={t.id} style={S.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}
-      </div>
+      <div style={s.page}>
 
-      {/* ── NOW ── */}
-      {tab === "now" && (
-        <div style={S.page}>
-          <span style={S.sectionLabel}>CURRENT POSITION</span>
-
-          <div style={S.fieldGroup}>
-            <span style={S.label}>現在のテーマ</span>
-            <input style={S.input} value={data.dashboard.theme} onChange={e => set("dashboard.theme", e.target.value)} placeholder="例：観察" />
-          </div>
-
-          <div style={S.fieldGroup}>
-            <span style={S.label}>現在フェーズ</span>
-            <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-              {PHASES.map(p => <button key={p} style={S.pill(data.dashboard.phase === p)} onClick={() => set("dashboard.phase", p)}>{p}</button>)}
-            </div>
-          </div>
-
-          <div style={S.fieldGroup}>
-            <span style={S.label}>今週の重点</span>
-            <input style={S.input} value={data.dashboard.weekFocus} onChange={e => set("dashboard.weekFocus", e.target.value)} placeholder="例：RAIte Brainを動く状態にする" />
-          </div>
-
-          {[
-            { key: "inProgress", label: "制作中", ph: "例：note #8" },
-            { key: "worries", label: "悩み", ph: "例：観察という言葉が固い" },
-            { key: "nextActions", label: "次にやること", ph: "例：note執筆" },
-          ].map(f => (
-            <div key={f.key} style={S.fieldGroup}>
-              <span style={S.label}>{f.label}</span>
-              {data.dashboard[f.key].map((v, i) => (
-                <div key={i} style={S.row}>
-                  <input style={{ ...S.input, flex: 1 }} value={v} onChange={e => dashList(f.key, i, e.target.value)} placeholder={f.ph} />
-                  <button style={S.removeBtn} onClick={() => dashRemove(f.key, i)}>×</button>
-                </div>
-              ))}
-              <button style={S.addBtn} onClick={() => dashAdd(f.key)}>＋ 追加</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── MEMORY ── */}
-      {tab === "memory" && (
-        <div style={S.page}>
-          <span style={S.sectionLabel}>NEW</span>
-
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <div style={{ flex: 1 }}>
-              <span style={S.label}>種別</span>
-              <div style={{ display: "flex", gap: 6 }}>
-                {MEM_TYPES.map(t => <button key={t} style={S.pill(newMem.type === t)} onClick={() => setNewMem({ ...newMem, type: t })}>{t}</button>)}
+        {/* ── BASE ── */}
+        {tab === "base" && (
+          <div>
+            <div style={s.sec}>
+              <Label T={T}>現在フェーズ</Label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {PHASES.map(p => <Tag key={p} T={T} active={data.phase === p} onClick={() => set("phase", p)}>{p}</Tag>)}
               </div>
             </div>
-          </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <span style={S.label}>ソース</span>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {MEM_SOURCES.map(s => <button key={s} style={S.pill(newMem.source === s, SOURCE_COLORS[s])} onClick={() => setNewMem({ ...newMem, source: s })}>{s}</button>)}
-            </div>
-          </div>
+            <Divider T={T} />
 
-          <textarea style={{ ...S.textarea, marginBottom: 10 }} value={newMem.content} onChange={e => setNewMem({ ...newMem, content: e.target.value })} placeholder="観察・気づき・メモを記録する" rows={3} />
-
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <div style={{ flex: 1 }}>
-              <span style={S.label}>タグ</span>
-              <select style={S.select} value={newMem.tag} onChange={e => setNewMem({ ...newMem, tag: e.target.value })}>
-                {MEM_TAGS.map(t => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-            <div style={{ flex: 1 }}>
-              <span style={S.label}>状態</span>
-              <select style={S.select} value={newMem.state} onChange={e => setNewMem({ ...newMem, state: e.target.value })}>
-                {MEM_STATES.map(s => <option key={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <span style={S.label}>重要度</span>
-            <Stars value={newMem.importance} onChange={v => setNewMem({ ...newMem, importance: v })} />
-          </div>
-
-          <button style={S.primaryBtn} onClick={addMemory}>記録する</button>
-
-          <span style={{ ...S.sectionLabel, marginTop: 26 }}>LOG</span>
-
-          <input style={S.searchBar} value={search} onChange={e => setSearch(e.target.value)} placeholder="検索（内容・タグ・状態・ソース）" />
-
-          <div style={S.filterRow}>
-            {MEM_TYPES.map(t => (
-              <button key={t} style={S.pill(filterType === t)} onClick={() => setFilterType(filterType === t ? "" : t)}>{t}</button>
-            ))}
-            {MEM_STATES.map(s => (
-              <button key={s} style={S.pill(filterState === s, STATE_COLORS[s])} onClick={() => setFilterState(filterState === s ? "" : s)}>{s}</button>
-            ))}
-          </div>
-
-          <div style={{ ...S.filterRow, marginBottom: 10 }}>
-            {MEM_SOURCES.map(s => (
-              <button key={s} style={S.pill(filterSource === s, SOURCE_COLORS[s])} onClick={() => setFilterSource(filterSource === s ? "" : s)}>{s}</button>
-            ))}
-          </div>
-
-          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 14 }}>
-            <span style={{ fontSize: 10, color: C.muted }}>★以上</span>
-            {[1,2,3,4,5].map(n => (
-              <button key={n} style={{ ...S.pill(filterStar === n), padding: "3px 9px" }} onClick={() => setFilterStar(filterStar === n ? 0 : n)}>{n}</button>
-            ))}
-          </div>
-
-          <p style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>{filtered.length}件</p>
-
-          {filtered.length === 0 && <p style={{ color: C.muted, fontSize: 13 }}>記憶はまだありません。</p>}
-
-          {filtered.map(mem => (
-            <div key={mem.id} style={S.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  <span style={S.badge(STATE_COLORS[mem.state] || C.muted)}>{mem.state}</span>
-                  <span style={S.badge(SOURCE_COLORS[mem.source] || C.muted)}>{mem.source}</span>
-                  <span style={{ fontSize: 9, color: C.muted, padding: "2px 0" }}>{mem.type} · {mem.tag}</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                  <span style={{ fontSize: 9, color: C.muted }}>{mem.date}</span>
-                  <button style={S.removeBtn} onClick={() => deleteMem(mem.id)}>×</button>
-                </div>
-              </div>
-
-              {editingMem === mem.id ? (
-                <>
-                  <textarea style={{ ...S.textarea, marginBottom: 8 }} value={mem.content} onChange={e => updateMem(mem.id, "content", e.target.value)} rows={2} />
-                  <div style={{ display: "flex", gap: 7, marginBottom: 8, flexWrap: "wrap" }}>
-                    {MEM_STATES.map(s => <button key={s} style={S.pill(mem.state === s, STATE_COLORS[s])} onClick={() => updateMem(mem.id, "state", s)}>{s}</button>)}
-                  </div>
-                  <div style={{ display: "flex", gap: 7, marginBottom: 8, flexWrap: "wrap" }}>
-                    {MEM_SOURCES.map(s => <button key={s} style={S.pill(mem.source === s, SOURCE_COLORS[s])} onClick={() => updateMem(mem.id, "source", s)}>{s}</button>)}
-                  </div>
-                  <Stars value={mem.importance} onChange={v => updateMem(mem.id, "importance", v)} />
-                  <div style={{ marginTop: 8 }}>
-                    <button style={{ ...S.addBtn }} onClick={() => setEditingMem(null)}>完了</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p style={{ fontSize: 13, margin: "0 0 8px", lineHeight: 1.65 }}>{mem.content}</p>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: C.accent }}>{"★".repeat(mem.importance)}{"☆".repeat(5 - mem.importance)}</span>
-                    <button style={{ ...S.addBtn, fontSize: 10, padding: "3px 9px" }} onClick={() => setEditingMem(mem.id)}>編集</button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── SYNC ── */}
-      {tab === "sync" && (
-        <div style={S.page}>
-          <span style={S.sectionLabel}>AI CONTEXT SYNC</span>
-          <p style={{ fontSize: 11, color: C.muted, marginBottom: 18, lineHeight: 1.7 }}>
-            Dashboardとブランド仕様・重要な記憶（採用→仮説→重要度順、上位5件）から自動生成。<br />コピーして各AIに貼り付ける。
-          </p>
-
-          {[
-            { key: "claude", name: "Claude", desc: "アプリ開発責任者" },
-            { key: "chappy", name: "チャッピー", desc: "相談役" },
-            { key: "gemini", name: "Gemini", desc: "参謀" },
-          ].map(ai => (
-            <div key={ai.key} style={{ marginBottom: 22 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <span style={{ fontSize: 14, fontWeight: 700 }}>{ai.name}</span>
-                  <span style={{ fontSize: 10, color: C.muted, marginLeft: 8 }}>{ai.desc}</span>
-                </div>
-              </div>
-              <div style={S.promptBox}>{generatePrompt(ai.key)}</div>
-              <button style={S.copyBtn(copied === ai.key)} onClick={() => copyPrompt(ai.key)}>
-                {copied === ai.key ? "✓ コピーしました" : `${ai.name}用をコピー`}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── ARCHIVE ── */}
-      {tab === "archive" && (
-        <div style={S.page}>
-          <span style={S.sectionLabel}>NEW</span>
-
-          <div style={{ marginBottom: 10 }}>
-            <span style={S.label}>種別</span>
-            <div style={{ display: "flex", gap: 7 }}>
-              {ARC_TYPES.map(t => (
-                <button key={t} style={S.pill(newArc.type === t)} onClick={() => setNewArc({ ...newArc, type: t })}>{t}</button>
-              ))}
-            </div>
-          </div>
-
-          <textarea style={{ ...S.textarea, marginBottom: 10 }} value={newArc.content} onChange={e => setNewArc({ ...newArc, content: e.target.value })} placeholder="内容（発信テキスト・メモなど）" rows={4} />
-
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <div style={{ flex: 1 }}>
-              <span style={S.label}>タグ</span>
-              <select style={S.select} value={newArc.tag} onChange={e => setNewArc({ ...newArc, tag: e.target.value })}>
-                {MEM_TAGS.map(t => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <span style={S.label}>メモ（任意）</span>
-            <input style={S.input} value={newArc.memo} onChange={e => setNewArc({ ...newArc, memo: e.target.value })} placeholder="補足・経緯など" />
-          </div>
-
-          <button style={S.primaryBtn} onClick={addArchive}>保存する</button>
-
-          <span style={{ ...S.sectionLabel, marginTop: 26 }}>STOCK</span>
-          <p style={{ fontSize: 10, color: C.muted, marginBottom: 12 }}>同期プロンプトには反映されません</p>
-
-          <input style={S.searchBar} value={arcSearch} onChange={e => setArcSearch(e.target.value)} placeholder="検索（内容・タグ・メモ）" />
-
-          <div style={{ ...S.filterRow, marginBottom: 14 }}>
-            {ARC_TYPES.map(t => (
-              <button key={t} style={S.pill(arcFilterType === t)} onClick={() => setArcFilterType(arcFilterType === t ? "" : t)}>{t}</button>
-            ))}
-          </div>
-
-          <p style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>{filteredArc.length}件</p>
-
-          {filteredArc.length === 0 && <p style={{ color: C.muted, fontSize: 13 }}>ストックはまだありません。</p>}
-
-          {filteredArc.map(arc => (
-            <div key={arc.id} style={S.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                  <span style={S.badge(arc.type === "発信済み" ? C.green : C.muted)}>{arc.type}</span>
-                  <span style={{ fontSize: 9, color: C.muted }}>{arc.tag}</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 9, color: C.muted }}>{arc.date}</span>
-                  <button style={S.removeBtn} onClick={() => deleteArchive(arc.id)}>×</button>
-                </div>
-              </div>
-              <p style={{ fontSize: 13, margin: "0 0 6px", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{arc.content}</p>
-              {arc.memo && <p style={{ fontSize: 11, color: C.muted, margin: 0 }}>{arc.memo}</p>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── SETTINGS ── */}
-      {tab === "settings" && (
-        <div style={S.page}>
-          <span style={S.sectionLabel}>BRAND SPEC</span>
-          <div style={{ marginBottom: 14 }}>
-            <button style={S.disclosure} onClick={() => setShowMission(!showMission)}>
-              <span style={{ fontSize: 12 }}>{showMission ? "▾" : "▸"}</span>
-              ミッション・ビジョン（折りたたみ）
-            </button>
-            {showMission && (
-              <div style={{ marginTop: 12 }}>
+            <div style={s.sec}>
+              <Label T={T}>ブランド仕様</Label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {[
-                  { key: "mission", label: "ミッション", ph: "RAIteが存在する理由" },
-                  { key: "vision", label: "ビジョン", ph: "RAIteが目指す世界" },
+                  { key: "mission", ph: "ミッション" },
+                  { key: "vision", ph: "ビジョン" },
+                  { key: "tone", ph: "トーン・スタイル" },
+                  { key: "forbidden", ph: "禁止事項" },
                 ].map(f => (
-                  <div key={f.key} style={S.fieldGroup}>
-                    <span style={S.label}>{f.label}</span>
-                    <textarea style={S.textarea} value={data.brand[f.key]} onChange={e => set(`brand.${f.key}`, e.target.value)} placeholder={f.ph} rows={2} />
-                  </div>
+                  <Input key={f.key} T={T} value={data.brand[f.key]}
+                    onChange={v => set(`brand.${f.key}`, v)} placeholder={f.ph} />
                 ))}
               </div>
+            </div>
+
+            <Divider T={T} />
+
+            <div style={s.sec}>
+              <Label T={T}>AI 役割定義</Label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {AI_KEYS.map(key => {
+                  const role = data.aiRoles[key];
+                  const isEditing = editingRole === key;
+                  return (
+                    <div key={key} style={s.card}>
+                      <div style={{ padding: "10px 12px", display: "flex", alignItems: "center",
+                        justifyContent: "space-between", borderBottom: isEditing ? `1px solid ${T.border}` : "none" }}>
+                        <div>
+                          <span style={{ fontSize: 13, fontWeight: 600 }}>{role.title}</span>
+                          <span style={{ fontSize: 11, color: T.muted2, marginLeft: 8 }}>{role.subtitle}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <Btn T={T} size="sm" variant="ghost" onClick={() => setEditingRole(isEditing ? null : key)}>
+                            {isEditing ? "閉じる" : "編集"}
+                          </Btn>
+                          <Btn T={T} size="sm" variant="ghost" onClick={() => optimizeRole(key)} disabled={!!optimizing}>
+                            {optimizing === key ? <Dots /> : "最適化"}
+                          </Btn>
+                        </div>
+                      </div>
+                      {isEditing && (
+                        <div style={{ padding: 12 }}>
+                          <Textarea T={T} value={role.content}
+                            onChange={v => set(`aiRoles.${key}.content`, v)}
+                            placeholder={`${role.title}への指示・役割定義...`} rows={4} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <Divider T={T} />
+
+            <div style={s.sec}>
+              <Label T={T}>追加メモ</Label>
+              <div style={{ fontSize: 12, color: T.muted, marginBottom: 10, lineHeight: 1.6 }}>
+                会話中に生まれたプロンプトを一時保存。「統合」で選択したAIの役割定義に最適化して追加。
+              </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                {AI_KEYS.map(k => (
+                  <Tag key={k} T={T} active={memoTarget === k} onClick={() => setMemoTarget(k)}>
+                    {data.aiRoles[k].title}
+                  </Tag>
+                ))}
+              </div>
+              <Textarea T={T} value={memoText} onChange={setMemoText}
+                placeholder="貼り付けたいプロンプトや気づき..." rows={3} />
+              <Btn T={T} variant="ghost" style={{ width: "100%", marginTop: 8 }} onClick={() => {
+                if (!memoText.trim()) return;
+                const m = { id: Date.now(), target: memoTarget, content: memoText,
+                  date: new Date().toLocaleDateString("ja-JP") };
+                set("memos", [m, ...data.memos]);
+                setMemoText("");
+                showToast("保存しました");
+              }}>保存</Btn>
+
+              {data.memos.length > 0 && (
+                <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {data.memos.map(memo => (
+                    <div key={memo.id} style={s.card}>
+                      <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>{data.aiRoles[memo.target]?.title}</span>
+                        <span style={{ fontSize: 11, color: T.muted2 }}>{memo.date}</span>
+                      </div>
+                      <div style={{ padding: "0 12px", fontSize: 12, color: T.muted, lineHeight: 1.6, marginBottom: 10 }}>
+                        {memo.content}
+                      </div>
+                      <div style={{ padding: "0 12px 12px", display: "flex", gap: 6 }}>
+                        <Btn T={T} size="sm" variant="ghost"
+                          onClick={() => set("memos", data.memos.filter(m => m.id !== memo.id))}>削除</Btn>
+                        <Btn T={T} size="sm" onClick={() => mergeMemo(memo)} disabled={!!merging}>
+                          {merging === memo.id ? <Dots /> : "統合して最適化"}
+                        </Btn>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── INSTRUCT ── */}
+        {tab === "instruct" && (
+          <div>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 16, lineHeight: 1.6 }}>
+              ブランド仕様・AI役割定義・フェーズから自動生成。各AIに貼り付けて使う。
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {AI_KEYS.map(key => {
+                const role = data.aiRoles[key];
+                const prompt = buildPrompt(key);
+                return (
+                  <div key={key} style={s.card}>
+                    <div style={{ padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontSize: 14, fontWeight: 600 }}>{role.title}</span>
+                        <span style={{ fontSize: 11, color: T.muted2, marginLeft: 8 }}>{role.subtitle}</span>
+                      </div>
+                      <Btn T={T} onClick={() => copy(prompt)}>コピー</Btn>
+                    </div>
+                    <div style={{ padding: "0 14px 12px" }}>
+                      <div style={{ background: T.codeBg, border: `1px solid ${T.border}`, borderRadius: 6,
+                        padding: "10px 12px", fontSize: 11, color: T.codeText, lineHeight: 1.7,
+                        maxHeight: 72, overflow: "hidden" }}>
+                        {prompt || "（未設定）"}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── PUBLISH ── */}
+        {tab === "publish" && (
+          <div>
+            <div style={s.sec}>
+              <Label T={T}>記事</Label>
+              <Textarea T={T} value={articleText} onChange={setArticleText}
+                placeholder="記事本文を貼り付ける..." rows={5} />
+              <Input T={T} value={articleUrl} onChange={setArticleUrl}
+                placeholder="note URL（任意）" style={{ marginTop: 8 }} />
+              <Btn T={T} onClick={generateSNS} disabled={generating || !articleText.trim()}
+                style={{ width: "100%", marginTop: 10 }}>
+                {generating ? <><Dots /> 生成中...</> : "投稿文を生成 →"}
+              </Btn>
+            </div>
+
+            {data.publishHistory.length > 0 && (
+              <>
+                <Divider T={T} />
+                <Label T={T}>生成履歴</Label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {data.publishHistory.map((entry, i) => (
+                    <div key={entry.id} style={s.card}>
+                      <div style={{ padding: "10px 14px", borderBottom: `1px solid ${T.border}`,
+                        display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: T.muted2 }}>
+                          {i === 0 ? "最新" : `${i + 1}件前`} · {entry.date}
+                        </span>
+                        <Btn T={T} size="sm" variant="danger"
+                          onClick={() => set("publishHistory", data.publishHistory.filter(h => h.id !== entry.id))}>
+                          削除
+                        </Btn>
+                      </div>
+                      <div style={{ padding: "8px 14px 4px", fontSize: 11, color: T.muted2 }}>
+                        {entry.articlePreview}
+                      </div>
+
+                      <div style={{ padding: "8px 14px 12px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: T.muted, letterSpacing: "0.1em" }}>X</div>
+                          <XCount T={T} text={entry.x} url={entry.url} />
+                        </div>
+                        <div style={{ fontSize: 13, color: T.text, lineHeight: 1.7, marginBottom: 6 }}>{entry.x}</div>
+                        {entry.url && <div style={{ fontSize: 11, color: T.accent, marginBottom: 8 }}>{entry.url}</div>}
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <Btn T={T} size="sm" variant="ghost"
+                            onClick={() => copy(entry.url ? `${entry.x}\n${entry.url}` : entry.x)}>コピー</Btn>
+                          <Btn T={T} size="sm" variant="accent"
+                            onClick={() => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(entry.url ? `${entry.x}\n${entry.url}` : entry.x)}`, "_blank")}>
+                            Xで開く
+                          </Btn>
+                        </div>
+                      </div>
+
+                      {entry.threads && (
+                        <div style={{ padding: "8px 14px 12px", borderTop: `1px solid ${T.border}` }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: T.muted, letterSpacing: "0.1em", marginBottom: 6 }}>Threads</div>
+                          <div style={{ fontSize: 13, color: T.text, lineHeight: 1.7, marginBottom: 8, whiteSpace: "pre-wrap" }}>
+                            {entry.threads}
+                          </div>
+                          <Btn T={T} size="sm" variant="ghost"
+                            onClick={() => copy(entry.url ? `${entry.threads}\n${entry.url}` : entry.threads)}>コピー</Btn>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
+        )}
 
-          {[
-            { key: "tone", label: "トーン", ph: "乾いたトーン、実務ベース・観察型..." },
-            { key: "forbidden", label: "禁止事項", ph: "AIで人生変わりました、DX成功法則..." },
-          ].map(f => (
-            <div key={f.key} style={S.fieldGroup}>
-              <span style={S.label}>{f.label}</span>
-              <textarea style={S.textarea} value={data.brand[f.key]} onChange={e => set(`brand.${f.key}`, e.target.value)} placeholder={f.ph} rows={2} />
+        {/* ── STOCK ── */}
+        {tab === "stock" && (
+          <div>
+            <div style={s.sec}>
+              <Label T={T}>追加</Label>
+              <Textarea T={T} value={stockText} onChange={setStockText}
+                placeholder={"記事・メモ・発信済みテキストなど...\nプロンプトには反映されません"} rows={4} />
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                {STOCK_TYPES.map(t => <Tag key={t} T={T} active={stockType === t} onClick={() => setStockType(t)}>{t}</Tag>)}
+              </div>
+              <Btn T={T} style={{ width: "100%", marginTop: 10 }} onClick={() => {
+                if (!stockText.trim()) return;
+                const st = { id: Date.now(), type: stockType, content: stockText,
+                  date: new Date().toLocaleDateString("ja-JP") };
+                set("stocks", [st, ...data.stocks]);
+                setStockText("");
+                showToast("保存しました");
+              }}>保存</Btn>
             </div>
-          ))}
 
-          <span style={S.sectionLabel}>用語辞典</span>
-          {data.brand.glossary.map((g, i) => (
-            <div key={i} style={{ ...S.row, marginBottom: 8 }}>
-              <input style={{ ...S.input, flex: "0 0 90px" }} value={g.term} onChange={e => glossaryUpdate(i, "term", e.target.value)} placeholder="用語" />
-              <input style={{ ...S.input, flex: 1 }} value={g.definition} onChange={e => glossaryUpdate(i, "definition", e.target.value)} placeholder="定義" />
-              <button style={S.removeBtn} onClick={() => glossaryRemove(i)}>×</button>
+            <Divider T={T} />
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <Input T={T} value={stockSearch} onChange={setStockSearch} placeholder="検索..." style={{ flex: 1 }} />
             </div>
-          ))}
-          <button style={S.addBtn} onClick={glossaryAdd}>＋ 用語追加</button>
-
-          <span style={S.sectionLabel}>AI役割定義</span>
-          {[{ key: "claude", name: "Claude" }, { key: "chappy", name: "チャッピー" }, { key: "gemini", name: "Gemini" }].map(ai => (
-            <div key={ai.key} style={S.fieldGroup}>
-              <span style={S.label}>{ai.name}</span>
-              <textarea style={S.textarea} value={data.brand.aiRoles[ai.key]} onChange={e => set(`brand.aiRoles.${ai.key}`, e.target.value)} rows={2} />
+            <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+              <Tag T={T} active={stockFilter === ""} onClick={() => setStockFilter("")}>すべて</Tag>
+              {STOCK_TYPES.map(t => <Tag key={t} T={T} active={stockFilter === t} onClick={() => setStockFilter(t)}>{t}</Tag>)}
             </div>
-          ))}
 
-          <hr style={S.divider} />
+            <div style={{ fontSize: 11, color: T.muted2, marginBottom: 10 }}>{filteredStocks.length}件</div>
 
-          <span style={{ ...S.sectionLabel, marginTop: 20 }}>BACKUP</span>
+            {filteredStocks.length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0", color: T.muted, fontSize: 13 }}>
+                ストックはまだありません
+              </div>
+            )}
 
-          <div style={S.fieldGroup}>
-            <span style={S.label}>エクスポート</span>
-            <button style={S.primaryBtn} onClick={exportData}>JSONをダウンロード</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {filteredStocks.map(stock => (
+                <div key={stock.id} style={s.card}>
+                  <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between" }}>
+                    <Tag T={T} active={false}>{stock.type}</Tag>
+                    <span style={{ fontSize: 11, color: T.muted2 }}>{stock.date}</span>
+                  </div>
+                  <div style={{ padding: "0 14px", fontSize: 13, color: T.text, lineHeight: 1.7,
+                    marginBottom: 10, whiteSpace: "pre-wrap" }}>{stock.content}</div>
+                  <div style={{ padding: "0 14px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <Btn T={T} size="sm" variant="ghost" onClick={() => copy(stock.content)}>コピー</Btn>
+                    <Btn T={T} size="sm" variant="ghost" onClick={() => sendToPublish(stock.content)}>発信へ送る</Btn>
+                    <Btn T={T} size="sm" variant="danger"
+                      onClick={() => set("stocks", data.stocks.filter(x => x.id !== stock.id))}>削除</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
+        )}
 
-          <div style={S.fieldGroup}>
-            <span style={S.label}>インポート</span>
-            <p style={{ fontSize: 11, color: C.red, marginBottom: 8 }}>※現在のデータは上書きされます</p>
-            <label style={{ ...S.primaryBtn, display: "block", textAlign: "center", cursor: "pointer", background: C.green, boxSizing: "border-box" }}>
-              JSONファイルを選択
-              <input type="file" accept=".json" onChange={importFromFile} style={{ display: "none" }} />
-            </label>
+        {/* ── SETTINGS ── */}
+        {tab === "settings" && (
+          <div>
+            <div style={s.sec}>
+              <Label T={T}>Claude API Key</Label>
+              <div style={{ background: T.theme === "dark" ? "#1a2a1a" : "#f0fdf4",
+                border: `1px solid ${T.theme === "dark" ? "#2a4a2a" : "#bbf7d0"}`,
+                borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+                <div style={{ fontSize: 12, color: T.theme === "dark" ? "#86efac" : "#166534",
+                  fontWeight: 600, marginBottom: 4 }}>🔒 APIキーは安全に保存されます</div>
+                <div style={{ fontSize: 11, color: T.theme === "dark" ? "#6ee7b7" : "#15803d", lineHeight: 1.7 }}>
+                  入力されたAPIキーはお使いのデバイス内（localStorage）にのみ保存されます。
+                  開発者を含む外部のサーバーには一切送信されません。
+                </div>
+              </div>
+              <Input T={T} value={data.apiKey} onChange={v => set("apiKey", v)}
+                placeholder="sk-ant-..." style={{ fontFamily: "monospace", fontSize: 12 }} />
+              <div style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.6 }}>
+                取得：console.anthropic.com
+              </div>
+            </div>
+
+            <Divider T={T} />
+
+            <div style={s.sec}>
+              <Label T={T}>表示モード</Label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Tag T={T} active={data.theme === "light"} onClick={() => set("theme", "light")}>ライト</Tag>
+                <Tag T={T} active={data.theme === "dark"} onClick={() => set("theme", "dark")}>ダーク</Tag>
+              </div>
+            </div>
+
+            <Divider T={T} />
+
+            <div style={s.sec}>
+              <Label T={T}>テンプレートをリセット</Label>
+              <div style={{ fontSize: 12, color: T.muted, marginBottom: 8, lineHeight: 1.6 }}>
+                ブランド仕様・AI役割定義をサンプルテンプレートに戻します。
+              </div>
+              <Btn T={T} variant="ghost" onClick={() => {
+                if (!confirm("テンプレートに戻しますか？現在の内容は上書きされます。")) return;
+                set("brand", { ...TEMPLATE.brand });
+                set("aiRoles", {
+                  common: { title: "共通", subtitle: "全AIへの共通前提", content: TEMPLATE.aiRoles.common },
+                  claude:  { title: "Claude", subtitle: "実装・設計・世界観", content: TEMPLATE.aiRoles.claude },
+                  chappy:  { title: "チャッピー", subtitle: "壁打ち・構造整理", content: TEMPLATE.aiRoles.chappy },
+                  gemini:  { title: "Gemini", subtitle: "参謀・戦略", content: TEMPLATE.aiRoles.gemini },
+                });
+                showToast("テンプレートに戻しました");
+              }} style={{ width: "100%" }}>テンプレートに戻す</Btn>
+            </div>
+
+            <Divider T={T} />
+
+            <div style={s.sec}>
+              <Label T={T}>バックアップ</Label>
+              <div style={{ fontSize: 12, color: T.muted, marginBottom: 10, lineHeight: 1.6 }}>
+                データが消えた場合に備えて定期的にバックアップを取ってください。
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <Btn T={T} variant="ghost" style={{ width: "100%" }} onClick={() => {
+                  copy(JSON.stringify(data, null, 2));
+                }}>全データをテキストでコピー（メモ帳に貼り付け保存）</Btn>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>テキストから復元（コピーしたデータを貼り付け）</div>
+                <Textarea T={T} value="" onChange={v => {
+                  if (!v.trim()) return;
+                  try {
+                    setData(deepMerge(defaultData, JSON.parse(v)));
+                    showToast("復元しました");
+                  } catch { showToast("データの形式が正しくありません"); }
+                }} placeholder="バックアップテキストをここに貼り付け..." rows={2} />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn T={T} variant="ghost" style={{ flex: 1 }} onClick={() => {
+                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url; a.download = `raite_${new Date().toISOString().slice(0,10)}.json`; a.click();
+                  URL.revokeObjectURL(url);
+                }}>JSONで保存</Btn>
+                <label style={{ flex: 1, display: "block" }}>
+                  <Btn T={T} variant="ghost" style={{ width: "100%", pointerEvents: "none" }}>JSONを読み込む</Btn>
+                  <input type="file" accept=".json" style={{ display: "none" }} onChange={e => {
+                    const file = e.target.files[0]; if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = ev => {
+                      try { setData(deepMerge(defaultData, JSON.parse(ev.target.result))); showToast("インポートしました"); }
+                      catch { showToast("JSONの形式が正しくありません"); }
+                    };
+                    reader.readAsText(file); e.target.value = "";
+                  }} />
+                </label>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+      </div>
+
+      {/* Bottom Nav */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: T.headerBg, borderTop: `1px solid ${T.headerBorder}`,
+        display: "flex", zIndex: 100,
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+      }}>
+        {TABS.map(t => {
+          const icons = { base: "◈", instruct: "⇄", publish: "✦", stock: "≡", settings: "⚙" };
+          const active = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              flex: 1, padding: "10px 4px 8px", border: "none", background: "none",
+              cursor: "pointer", fontFamily: ff, display: "flex", flexDirection: "column",
+              alignItems: "center", gap: 3,
+            }}>
+              <span style={{ fontSize: 18, color: active ? T.tabActive : T.muted, lineHeight: 1 }}>
+                {icons[t.id]}
+              </span>
+              <span style={{ fontSize: 9, color: active ? T.tabActive : T.muted,
+                fontWeight: active ? 600 : 400, letterSpacing: "0.06em" }}>
+                {t.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <Toast message={toast} T={T} />
     </div>
   );
 }
