@@ -607,7 +607,7 @@ JSONのみ返す：{"x":"X用。一番刺さる一行。140文字以内。URLな
                           <Btn T={T} size="sm" variant="ghost"
                             onClick={() => copy(entry.url ? `${entry.x}\n${entry.url}` : entry.x)}>コピー</Btn>
                           <Btn T={T} size="sm" variant="accent"
-                            onClick={() => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(entry.url ? `${entry.x}\n${entry.url}` : entry.x)}`, "_blank")}>
+                            onClick={() => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(entry.url ? `${entry.x}\n${entry.url}` : entry.x)}`, "_blank", "noopener,noreferrer")}>
                             Xで開く
                           </Btn>
                         </div>
