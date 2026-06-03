@@ -249,6 +249,12 @@ export default function RAIteBrain() {
   const [stockType, setStockType] = useState("発信済み");
   const [stockSearch, setStockSearch] = useState("");
   const [stockFilter, setStockFilter] = useState("");
+  const [expandedStocks, setExpandedStocks] = useState(new Set());
+  const toggleStock = (id) => setExpandedStocks(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   useEffect(() => { persist(data); }, [data]);
 
@@ -670,22 +676,32 @@ JSONのみ返す：{"x":"X用。一番刺さる一行。140文字以内。URLな
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {filteredStocks.map(stock => (
-                <div key={stock.id} style={s.card}>
-                  <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between" }}>
-                    <Tag T={T} active={false}>{stock.type}</Tag>
-                    <span style={{ fontSize: 11, color: T.muted2 }}>{stock.date}</span>
+              {filteredStocks.map(stock => {
+                const expanded = expandedStocks.has(stock.id);
+                return (
+                  <div key={stock.id} style={s.card}>
+                    <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between" }}>
+                      <Tag T={T} active={false}>{stock.type}</Tag>
+                      <span style={{ fontSize: 11, color: T.muted2 }}>{stock.date}</span>
+                    </div>
+                    <div onClick={() => toggleStock(stock.id)} style={{ padding: "0 14px", cursor: "pointer" }}>
+                      <div style={{ fontSize: 13, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap",
+                        ...(expanded ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }) }}>
+                        {stock.content}
+                      </div>
+                      <div style={{ fontSize: 11, color: T.muted, marginTop: 4, marginBottom: 8 }}>
+                        {expanded ? "▲ 閉じる" : "▼ 続きを見る"}
+                      </div>
+                    </div>
+                    <div style={{ padding: "0 14px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <Btn T={T} size="sm" variant="ghost" onClick={() => copy(stock.content)}>コピー</Btn>
+                      <Btn T={T} size="sm" variant="ghost" onClick={() => sendToPublish(stock.content)}>発信へ送る</Btn>
+                      <Btn T={T} size="sm" variant="danger"
+                        onClick={() => set("stocks", data.stocks.filter(x => x.id !== stock.id))}>削除</Btn>
+                    </div>
                   </div>
-                  <div style={{ padding: "0 14px", fontSize: 13, color: T.text, lineHeight: 1.7,
-                    marginBottom: 10, whiteSpace: "pre-wrap" }}>{stock.content}</div>
-                  <div style={{ padding: "0 14px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <Btn T={T} size="sm" variant="ghost" onClick={() => copy(stock.content)}>コピー</Btn>
-                    <Btn T={T} size="sm" variant="ghost" onClick={() => sendToPublish(stock.content)}>発信へ送る</Btn>
-                    <Btn T={T} size="sm" variant="danger"
-                      onClick={() => set("stocks", data.stocks.filter(x => x.id !== stock.id))}>削除</Btn>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
