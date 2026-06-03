@@ -232,6 +232,7 @@ export default function RAIteBrain() {
   const [tab, setTab] = useState("base");
   const [toast, setToast] = useState("");
   const toastRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const T = data.theme === "dark" ? DARK : LIGHT;
 
@@ -750,18 +751,16 @@ JSONのみ返す：{"x":"X用。一番刺さる一行。140文字以内。URLな
                   a.href = url; a.download = `raite_${new Date().toISOString().slice(0,10)}.json`; a.click();
                   URL.revokeObjectURL(url);
                 }}>JSONで保存</Btn>
-                <label style={{ flex: 1, display: "block" }}>
-                  <Btn T={T} variant="ghost" style={{ width: "100%", pointerEvents: "none" }}>JSONを読み込む</Btn>
-                  <input type="file" accept=".json" style={{ display: "none" }} onChange={e => {
-                    const file = e.target.files[0]; if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = ev => {
-                      try { setData(deepMerge(defaultData, JSON.parse(ev.target.result))); showToast("インポートしました"); }
-                      catch { showToast("JSONの形式が正しくありません"); }
-                    };
-                    reader.readAsText(file); e.target.value = "";
-                  }} />
-                </label>
+                <Btn T={T} variant="ghost" style={{ flex: 1 }} onClick={() => fileInputRef.current?.click()}>JSONを読み込む</Btn>
+                <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={e => {
+                  const file = e.target.files[0]; if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => {
+                    try { setData(deepMerge(defaultData, JSON.parse(ev.target.result))); showToast("インポートしました"); }
+                    catch { showToast("JSONの形式が正しくありません"); }
+                  };
+                  reader.readAsText(file); e.target.value = "";
+                }} />
               </div>
             </div>
           </div>
