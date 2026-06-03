@@ -232,7 +232,6 @@ export default function RAIteBrain() {
   const [tab, setTab] = useState("base");
   const [toast, setToast] = useState("");
   const toastRef = useRef(null);
-  const fileInputRef = useRef(null);
 
   const T = data.theme === "dark" ? DARK : LIGHT;
 
@@ -271,6 +270,28 @@ export default function RAIteBrain() {
   };
 
   const copy = (text) => navigator.clipboard.writeText(text).then(() => showToast("コピーしました"));
+
+  const handleJsonImport = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.style.display = "none";
+    input.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      document.body.removeChild(input);
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          setData(deepMerge(defaultData, JSON.parse(ev.target.result)));
+          showToast("インポートしました");
+        } catch { showToast("JSONの形式が正しくありません"); }
+      };
+      reader.readAsText(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+  };
 
   const buildPrompt = (aiKey) => {
     const b = data.brand;
@@ -751,16 +772,7 @@ JSONのみ返す：{"x":"X用。一番刺さる一行。140文字以内。URLな
                   a.href = url; a.download = `raite_${new Date().toISOString().slice(0,10)}.json`; a.click();
                   URL.revokeObjectURL(url);
                 }}>JSONで保存</Btn>
-                <Btn T={T} variant="ghost" style={{ flex: 1 }} onClick={() => fileInputRef.current?.click()}>JSONを読み込む</Btn>
-                <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={e => {
-                  const file = e.target.files[0]; if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = ev => {
-                    try { setData(deepMerge(defaultData, JSON.parse(ev.target.result))); showToast("インポートしました"); }
-                    catch { showToast("JSONの形式が正しくありません"); }
-                  };
-                  reader.readAsText(file); e.target.value = "";
-                }} />
+                <Btn T={T} variant="ghost" style={{ flex: 1 }} onClick={handleJsonImport}>JSONを読み込む</Btn>
               </div>
             </div>
           </div>
